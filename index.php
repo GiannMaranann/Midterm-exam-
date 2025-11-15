@@ -15,12 +15,12 @@ $success = '';
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_POST['login'])) {
         // Login process
-        $email = trim($_POST['email']);
+        $username = trim($_POST['username']);
         $password = $_POST['password'];
         
-        if (!empty($email) && !empty($password)) {
-            $stmt = $pdo->prepare("SELECT * FROM users WHERE email = ?");
-            $stmt->execute([$email]);
+        if (!empty($username) && !empty($password)) {
+            $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ? OR email = ?");
+            $stmt->execute([$username, $username]);
             $user = $stmt->fetch();
             
             if ($user && password_verify($password, $user['password'])) {
@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 header("Location: dashboard.php");
                 exit();
             } else {
-                $error = "Invalid email or password!";
+                $error = "Invalid username or password!";
             }
         } else {
             $error = "Please fill in all fields!";
@@ -53,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } elseif (strlen($password) < 6) {
             $error = "Password must be at least 6 characters long!";
         } else {
-            // Check if email already exists
+            // Check if email or username already exists
             $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ? OR username = ?");
             $stmt->execute([$email, $username]);
             
@@ -66,6 +66,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 
                 if ($stmt->execute([$fullname, $email, $username, $hashed_password])) {
                     $success = "Registration successful! You can now login.";
+                    // Clear form data after successful registration
+                    $_POST = array();
                 } else {
                     $error = "Registration failed. Please try again.";
                 }
@@ -612,9 +614,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         <form id="loginForm" method="POST" action="">
           <input type="hidden" name="login" value="1">
           <div class="input-group">
-            <label for="loginEmail">Email</label>
-            <input type="email" id="loginEmail" name="email" placeholder="Enter your email" required 
-                   value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
+            <label for="loginUsername">Username</label>
+            <input type="text" id="loginUsername" name="username" placeholder="Enter your username" required 
+                   value="<?php echo (isset($_POST['username']) && !$success) ? htmlspecialchars($_POST['username']) : ''; ?>">
           </div>
           <div class="input-group">
             <label for="loginPassword">Password</label>
@@ -655,17 +657,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
           <div class="input-group">
             <label for="registerName">Full Name</label>
             <input type="text" id="registerName" name="fullname" placeholder="Enter your full name" required
-                   value="<?php echo isset($_POST['fullname']) ? htmlspecialchars($_POST['fullname']) : ''; ?>">
+                   value="<?php echo (isset($_POST['fullname']) && !$success) ? htmlspecialchars($_POST['fullname']) : ''; ?>">
           </div>
           <div class="input-group">
             <label for="registerEmail">Email</label>
             <input type="email" id="registerEmail" name="email" placeholder="Enter your email" required
-                   value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>">
+                   value="<?php echo (isset($_POST['email']) && !$success) ? htmlspecialchars($_POST['email']) : ''; ?>">
           </div>
           <div class="input-group">
             <label for="registerUsername">Username</label>
             <input type="text" id="registerUsername" name="username" placeholder="Enter your username" required
-                   value="<?php echo isset($_POST['username']) ? htmlspecialchars($_POST['username']) : ''; ?>">
+                   value="<?php echo (isset($_POST['username']) && !$success) ? htmlspecialchars($_POST['username']) : ''; ?>">
           </div>
           <div class="input-group">
             <label for="registerPassword">Password</label>
@@ -817,12 +819,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     const passwordStrengthBar = document.getElementById('passwordStrengthBar');
     const passwordStrengthText = document.getElementById('passwordStrengthText');
 
-    // Auto-show forms if there are PHP errors/success
+    // Auto-show forms if there are PHP errors/success and auto-redirect on successful registration
     <?php if ($error || $success): ?>
       <?php if (isset($_POST['login'])): ?>
         showLoginForm();
       <?php elseif (isset($_POST['register'])): ?>
-        showRegisterForm();
+        <?php if ($success): ?>
+          // Auto-redirect to login form after successful registration
+          setTimeout(() => {
+            showLoginForm();
+          }, 100);
+        <?php else: ?>
+          showRegisterForm();
+        <?php endif; ?>
       <?php endif; ?>
     <?php endif; ?>
 

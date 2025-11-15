@@ -25,14 +25,29 @@ if (isset($_POST['add_user'])) {
     $username = trim($_POST['username']);
     $role = $_POST['role'];
     
-    try {
-        $stmt = $pdo->prepare("INSERT INTO user_records (full_name, email, username, user_role) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$full_name, $email, $username, $role]);
-        $message = "User added successfully!";
-        $message_type = "success";
-    } catch(PDOException $e) {
-        $message = "Error adding user: " . $e->getMessage();
+    // Validate inputs
+    if (empty($full_name) || empty($email) || empty($username) || empty($role)) {
+        $message = "Please fill in all fields!";
         $message_type = "error";
+    } else {
+        // Check if email or username already exists
+        $check_stmt = $pdo->prepare("SELECT id FROM user_records WHERE email = ? OR username = ?");
+        $check_stmt->execute([$email, $username]);
+        
+        if ($check_stmt->rowCount() > 0) {
+            $message = "Email or username already exists!";
+            $message_type = "error";
+        } else {
+            try {
+                $stmt = $pdo->prepare("INSERT INTO user_records (full_name, email, username, user_role, profile_image) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$full_name, $email, $username, $role, 'default-avatar.png']);
+                $message = "Record added successfully!";
+                $message_type = "success";
+            } catch(PDOException $e) {
+                $message = "Error adding user: " . $e->getMessage();
+                $message_type = "error";
+            }
+        }
     }
 }
 
@@ -47,7 +62,7 @@ if (isset($_POST['update_user'])) {
     try {
         $stmt = $pdo->prepare("UPDATE user_records SET full_name = ?, email = ?, username = ?, user_role = ? WHERE id = ?");
         $stmt->execute([$full_name, $email, $username, $role, $record_id]);
-        $message = "User updated successfully!";
+        $message = "Record updated successfully!";
         $message_type = "success";
     } catch(PDOException $e) {
         $message = "Error updating user: " . $e->getMessage();
@@ -59,13 +74,66 @@ if (isset($_POST['update_user'])) {
 if (isset($_GET['delete'])) {
     $record_id = $_GET['delete'];
     
+    // Confirmation is handled by JavaScript
     try {
         $stmt = $pdo->prepare("DELETE FROM user_records WHERE id = ?");
         $stmt->execute([$record_id]);
-        $message = "User deleted successfully!";
+        $message = "Record deleted successfully.";
         $message_type = "success";
     } catch(PDOException $e) {
         $message = "Error deleting user: " . $e->getMessage();
+        $message_type = "error";
+    }
+}
+
+// Handle profile image upload
+if (isset($_POST['upload_profile_image'])) {
+    $record_id = $_POST['record_id'];
+    $upload_dir = 'uploads/';
+    
+    // Create uploads directory if it doesn't exist
+    if (!is_dir($upload_dir)) {
+        mkdir($upload_dir, 0755, true);
+    }
+    
+    if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === UPLOAD_ERR_OK) {
+        $file_tmp_path = $_FILES['profile_image']['tmp_name'];
+        $file_name = $_FILES['profile_image']['name'];
+        $file_size = $_FILES['profile_image']['size'];
+        $file_type = $_FILES['profile_image']['type'];
+        
+        // Get file extension
+        $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+        
+        // Allowed file types
+        $allowed_ext = ['jpg', 'jpeg', 'png', 'gif'];
+        
+        if (in_array($file_ext, $allowed_ext)) {
+            if ($file_size <= 5000000) { // 5MB max
+                // Generate unique file name
+                $new_file_name = 'profile_' . $record_id . '_' . time() . '.' . $file_ext;
+                $dest_path = $upload_dir . $new_file_name;
+                
+                if (move_uploaded_file($file_tmp_path, $dest_path)) {
+                    // Update database with new profile image
+                    $stmt = $pdo->prepare("UPDATE user_records SET profile_image = ? WHERE id = ?");
+                    $stmt->execute([$new_file_name, $record_id]);
+                    $message = "Profile image updated successfully!";
+                    $message_type = "success";
+                } else {
+                    $message = "Error uploading file.";
+                    $message_type = "error";
+                }
+            } else {
+                $message = "File size must be less than 5MB.";
+                $message_type = "error";
+            }
+        } else {
+            $message = "Only JPG, JPEG, PNG & GIF files are allowed.";
+            $message_type = "error";
+        }
+    } else {
+        $message = "Please select a valid image file.";
         $message_type = "error";
     }
 }
@@ -117,6 +185,11 @@ if (isset($_POST['logout'])) {
             color: white;
             padding: 20px 0;
             box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
         }
 
         .logo {
@@ -124,6 +197,7 @@ if (isset($_POST['logout'])) {
             align-items: center;
             padding: 0 20px 20px;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 20px;
         }
 
         .logo i {
@@ -137,7 +211,7 @@ if (isset($_POST['logout'])) {
         }
 
         .menu {
-            margin-top: 30px;
+            flex: 1;
         }
 
         .menu-item {
@@ -146,10 +220,12 @@ if (isset($_POST['logout'])) {
             align-items: center;
             cursor: pointer;
             transition: all 0.3s ease;
+            border-left: 4px solid transparent;
         }
 
         .menu-item:hover {
             background-color: rgba(255, 255, 255, 0.1);
+            border-left-color: rgba(255, 255, 255, 0.3);
         }
 
         .menu-item.active {
@@ -160,12 +236,46 @@ if (isset($_POST['logout'])) {
         .menu-item i {
             margin-right: 10px;
             font-size: 18px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .logout-section {
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin-top: auto;
+        }
+
+        .logout-btn {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .logout-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
+        }
+
+        .logout-btn i {
+            margin-right: 8px;
         }
 
         /* Main Content Styles */
         .main-content {
             flex: 1;
             padding: 30px;
+            margin-left: 250px;
         }
 
         .header {
@@ -199,33 +309,12 @@ if (isset($_POST['logout'])) {
             gap: 15px;
         }
 
-        .user-info img {
-            width: 40px;
-            height: 40px;
+        .user-avatar {
+            width: 45px;
+            height: 45px;
             border-radius: 50%;
-        }
-
-        .logout-btn {
-            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-        }
-
-        .logout-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
-        }
-
-        .logout-btn i {
-            margin-right: 8px;
+            object-fit: cover;
+            border: 3px solid #1e3c72;
         }
 
         /* PHP Message Styles */
@@ -315,31 +404,50 @@ if (isset($_POST['logout'])) {
         th {
             font-weight: 600;
             color: #555;
+            background-color: #f8f9fa;
+        }
+
+        .user-avatar-small {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #ddd;
         }
 
         .actions {
             display: flex;
-            gap: 10px;
+            gap: 8px;
         }
 
-        .edit-btn, .delete-btn {
+        .view-btn, .edit-btn, .delete-btn {
             padding: 8px 12px;
             border: none;
             border-radius: 6px;
             cursor: pointer;
             transition: all 0.3s;
-            font-size: 14px;
+            font-size: 12px;
             display: flex;
             align-items: center;
         }
 
-        .edit-btn {
+        .view-btn {
             background-color: #3498db;
             color: white;
         }
 
-        .edit-btn:hover {
+        .view-btn:hover {
             background-color: #2980b9;
+            transform: translateY(-2px);
+        }
+
+        .edit-btn {
+            background-color: #2ecc71;
+            color: white;
+        }
+
+        .edit-btn:hover {
+            background-color: #27ae60;
             transform: translateY(-2px);
         }
 
@@ -353,7 +461,7 @@ if (isset($_POST['logout'])) {
             transform: translateY(-2px);
         }
 
-        .edit-btn i, .delete-btn i {
+        .view-btn i, .edit-btn i, .delete-btn i {
             margin-right: 5px;
         }
 
@@ -400,7 +508,7 @@ if (isset($_POST['logout'])) {
             background: white;
             border-radius: 20px;
             width: 90%;
-            max-width: 600px;
+            max-width: 800px;
             max-height: 90vh;
             overflow-y: auto;
             transform: scale(0.9);
@@ -453,8 +561,62 @@ if (isset($_POST['logout'])) {
             padding: 30px;
         }
 
-        .form-group {
+        .form-layout {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 30px;
+            align-items: start;
+        }
+
+        .profile-image-section {
+            text-align: center;
+        }
+
+        .profile-image-container {
+            position: relative;
+            display: inline-block;
             margin-bottom: 20px;
+        }
+
+        .profile-image-large {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 5px solid #1e3c72;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .upload-btn {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(30, 60, 114, 0.4);
+        }
+
+        .upload-btn i {
+            margin-right: 8px;
+        }
+
+        .form-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 0;
         }
 
         .form-group label {
@@ -512,6 +674,60 @@ if (isset($_POST['logout'])) {
             margin-right: 10px;
         }
 
+        /* Delete Confirmation Modal */
+        .delete-modal {
+            max-width: 500px;
+        }
+
+        .delete-modal .modal-body {
+            text-align: center;
+        }
+
+        .warning-icon {
+            font-size: 60px;
+            color: #e74c3c;
+            margin-bottom: 20px;
+        }
+
+        .delete-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 25px;
+        }
+
+        .cancel-btn {
+            background: #95a5a6;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .cancel-btn:hover {
+            background: #7f8c8d;
+            transform: translateY(-2px);
+        }
+
+        .confirm-delete-btn {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .confirm-delete-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(231, 76, 60, 0.4);
+        }
+
         /* Animations */
         @keyframes fadeIn {
             from { opacity: 0; }
@@ -534,22 +750,22 @@ if (isset($_POST['logout'])) {
 
         /* Responsive Design */
         @media (max-width: 992px) {
+            .sidebar {
+                width: 100%;
+                position: relative;
+                height: auto;
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+            
             .dashboard-container {
                 flex-direction: column;
             }
             
-            .sidebar {
-                width: 100%;
-                padding: 15px;
-            }
-            
-            .menu {
-                display: flex;
-                overflow-x: auto;
-            }
-            
-            .menu-item {
-                white-space: nowrap;
+            .form-layout {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -575,6 +791,11 @@ if (isset($_POST['logout'])) {
             .actions {
                 flex-direction: column;
             }
+            
+            .modal {
+                width: 95%;
+                margin: 20px;
+            }
         }
     </style>
 </head>
@@ -598,14 +819,13 @@ if (isset($_POST['logout'])) {
                     <i class="fas fa-users"></i>
                     <span>User Management</span>
                 </div>
-                <div class="menu-item">
-                    <i class="fas fa-chart-bar"></i>
-                    <span>Analytics</span>
-                </div>
-                <div class="menu-item">
-                    <i class="fas fa-cog"></i>
-                    <span>Settings</span>
-                </div>
+            </div>
+            <div class="logout-section">
+                <form method="POST">
+                    <button type="submit" name="logout" class="logout-btn">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </button>
+                </form>
             </div>
         </div>
 
@@ -614,12 +834,10 @@ if (isset($_POST['logout'])) {
             <div class="header">
                 <h2><i class="fas fa-tachometer-alt"></i> User Management Dashboard</h2>
                 <div class="user-info">
+                    <img src="uploads/<?php echo htmlspecialchars($current_user['profile_image'] ?? 'default-avatar.png'); ?>" 
+                         alt="Profile" class="user-avatar"
+                         onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDUiIGhlaWdodD0iNDUiIHZpZXdCb3g9IjAgMCA0NSA0NSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjIuNSIgY3k9IjIyLjUiIHI9IjIyLjUiIGZpbGw9IiMxZTNjNzIiLz4KPHN2ZyB4PSIxMSIgeT0iMTEiIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIj4KPHBhdGggZD0iTTEyIDJDMTMuMSAyIDE0IDIuOSAxNCA0QzE0IDUuMSAxMy4xIDYgMTIgNkMxMC45IDYgMTAgNS4xIDEwIDRDMTAgMi45IDEwLjkgMiAxMiAyWk0yMSAxOFYyMEgzVjE4QzMgMTUuOCA2LjEgMTQgMTIgMTRDMTcuOSAxNCAyMSAxNS45IDIxIDE4WiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+Cjwvc3ZnPgo='">
                     <span>Welcome, <?php echo htmlspecialchars($current_user['fullname']); ?>!</span>
-                    <form method="POST" style="display: inline;">
-                        <button type="submit" name="logout" class="logout-btn">
-                            <i class="fas fa-sign-out-alt"></i> Logout
-                        </button>
-                    </form>
                 </div>
             </div>
 
@@ -638,6 +856,7 @@ if (isset($_POST['logout'])) {
                     <table id="userTable">
                         <thead>
                             <tr>
+                                <th>Profile</th>
                                 <th>ID</th>
                                 <th>Full Name</th>
                                 <th>Email</th>
@@ -651,31 +870,41 @@ if (isset($_POST['logout'])) {
                             <?php if (count($user_records) > 0): ?>
                                 <?php foreach ($user_records as $record): ?>
                                     <tr class="person-row">
+                                        <td>
+                                            <img src="uploads/<?php echo htmlspecialchars($record['profile_image'] ?? 'default-avatar.png'); ?>" 
+                                                 alt="Profile" class="user-avatar-small"
+                                                 onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMjAiIGZpbGw9IiMxZTNjNzIiLz4KPHN2ZyB4PSI4IiB5PSI4IiB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSI+CjxwYXRoIGQ9Ik0xMiAyQzEzLjEgMiAxNCAyLjkgMTQgNEMxNCA1LjEgMTMuMSA2IDEyIDZDMTAgNiAxMCA1LjEgMTAgNEMxMCAyLjkgMTAuOSAyIDEyIDJaTTIxIDE4VjIwSDNWMThDMyAxNS44IDYuMSAxNCAxMiAxNEMxNy45IDE0IDIxIDE1LjkgMjEgMThaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4KPC9zdmc+Cg=='">
+                                        </td>
                                         <td><?php echo $record['id']; ?></td>
                                         <td><?php echo htmlspecialchars($record['full_name']); ?></td>
                                         <td><?php echo htmlspecialchars($record['email']); ?></td>
                                         <td><?php echo htmlspecialchars($record['username']); ?></td>
-                                        <td><?php echo htmlspecialchars($record['user_role']); ?></td>
+                                        <td>
+                                            <span style="padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 500; 
+                                                background-color: <?php 
+                                                    echo $record['user_role'] == 'Admin' ? '#e74c3c' : 
+                                                           ($record['user_role'] == 'Staff' ? '#3498db' : '#2ecc71'); 
+                                                ?>; color: white;">
+                                                <?php echo htmlspecialchars($record['user_role']); ?>
+                                            </span>
+                                        </td>
                                         <td><?php echo date('M j, Y g:i A', strtotime($record['date_added'])); ?></td>
                                         <td class="actions">
-                                            <button class="edit-btn" onclick="openEditModal(
-                                                <?php echo $record['id']; ?>,
-                                                '<?php echo addslashes($record['full_name']); ?>',
-                                                '<?php echo addslashes($record['email']); ?>',
-                                                '<?php echo addslashes($record['username']); ?>',
-                                                '<?php echo addslashes($record['user_role']); ?>'
-                                            )">
+                                            <button class="view-btn" onclick="openViewModal(<?php echo $record['id']; ?>)">
+                                                <i class="fas fa-eye"></i> View
+                                            </button>
+                                            <button class="edit-btn" onclick="openEditModal(<?php echo $record['id']; ?>)">
                                                 <i class="fas fa-edit"></i> Edit
                                             </button>
-                                            <a href="?delete=<?php echo $record['id']; ?>" class="delete-btn" onclick="return confirm('Are you sure you want to delete this user?')">
+                                            <button class="delete-btn" onclick="confirmDelete(<?php echo $record['id']; ?>, '<?php echo addslashes($record['full_name']); ?>')">
                                                 <i class="fas fa-trash"></i> Delete
-                                            </a>
+                                            </button>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="7">
+                                    <td colspan="8">
                                         <div class="no-data">
                                             <i class="fas fa-users"></i>
                                             <h3>No Users Added Yet</h3>
@@ -691,113 +920,265 @@ if (isset($_POST['logout'])) {
         </div>
     </div>
 
-    <!-- Modal for Adding/Editing User -->
-    <div class="modal-overlay" id="modalOverlay">
+    <!-- Modal for Adding User -->
+    <div class="modal-overlay" id="addModalOverlay">
         <div class="modal">
             <div class="modal-header">
-                <h3 class="modal-title" id="modalTitle">
+                <h3 class="modal-title">
                     <i class="fas fa-user-plus"></i>
                     Add New User
                 </h3>
-                <button class="close-btn" id="closeModalBtn">
+                <button class="close-btn" onclick="closeAddModal()">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="modal-body">
-                <form id="userForm" method="POST">
-                    <input type="hidden" id="record_id" name="record_id">
-                    <div class="form-group">
-                        <label for="full_name">Full Name</label>
-                        <input type="text" id="full_name" name="full_name" placeholder="Enter full name" required>
+                <form id="addUserForm" method="POST" enctype="multipart/form-data">
+                    <div class="form-layout">
+                        <div class="profile-image-section">
+                            <div class="profile-image-container">
+                                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDE1MCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJdsZUgY3g9Ijc1IiBjeT0iNzUiIHI9Ijc1IiBmaWxsPSIjZGRkZGRkIi8+CjxzdmcgeD0iNDAiIHk9IjQwIiB3aWR0aD0iNzAiIGhlaWdodD0iNzAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSI+CjxwYXRoIGQ9Ik0xMiAyQzEzLjEgMiAxNCAyLjkgMTQgNEMxNCA1LjEgMTMuMSA2IDEyIDZDMTAgNiAxMCA1LjEgMTAgNEMxMCAyLjkgMTAuOSAyIDEyIDJaTTIxIDE4VjIwSDNWMThDMyAxNS44IDYuMSAxNCAxMiAxNEMxNy45IDE0IDIxIDE1LjkgMjEgMThaIiBmaWxsPSIjOTk5OTk5Ii8+Cjwvc3ZnPgo8L3N2Zz4K" 
+                                     alt="Profile" class="profile-image-large" id="addProfileImage">
+                            </div>
+                            <input type="file" id="addProfileImageInput" name="profile_image" accept="image/*" style="display: none;" onchange="previewAddImage(this)">
+                            <button type="button" class="upload-btn" onclick="document.getElementById('addProfileImageInput').click()">
+                                <i class="fas fa-upload"></i> Upload Image
+                            </button>
+                        </div>
+                        <div class="form-section">
+                            <div class="form-group">
+                                <label for="add_full_name">Full Name *</label>
+                                <input type="text" id="add_full_name" name="full_name" placeholder="Enter full name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="add_email">Email Address *</label>
+                                <input type="email" id="add_email" name="email" placeholder="Enter email address" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="add_username">Username *</label>
+                                <input type="text" id="add_username" name="username" placeholder="Enter username" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="add_role">User Role *</label>
+                                <select id="add_role" name="role" required>
+                                    <option value="">Select Role</option>
+                                    <option value="Admin">Admin</option>
+                                    <option value="Staff">Staff</option>
+                                    <option value="Regular User">Regular User</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="submit-btn" name="add_user">
+                                <i class="fas fa-plus"></i>
+                                Add User
+                            </button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="email">Email Address</label>
-                        <input type="email" id="email" name="email" placeholder="Enter email address" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="username">Username</label>
-                        <input type="text" id="username" name="username" placeholder="Enter username" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="role">User Role</label>
-                        <select id="role" name="role" required>
-                            <option value="">Select Role</option>
-                            <option value="Admin">Admin</option>
-                            <option value="Staff">Staff</option>
-                            <option value="Regular User">Regular User</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="submit-btn" id="submitBtn" name="add_user">
-                        <i class="fas fa-plus"></i>
-                        Add User
-                    </button>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Viewing/Editing User -->
+    <div class="modal-overlay" id="viewModalOverlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="viewModalTitle">
+                    <i class="fas fa-user"></i>
+                    User Details
+                </h3>
+                <button class="close-btn" onclick="closeViewModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="viewUserForm" method="POST" enctype="multipart/form-data">
+                    <input type="hidden" id="view_record_id" name="record_id">
+                    <div class="form-layout">
+                        <div class="profile-image-section">
+                            <div class="profile-image-container">
+                                <img src="" alt="Profile" class="profile-image-large" id="viewProfileImage">
+                            </div>
+                            <input type="file" id="viewProfileImageInput" name="profile_image" accept="image/*" style="display: none;" onchange="previewViewImage(this)">
+                            <button type="button" class="upload-btn" onclick="document.getElementById('viewProfileImageInput').click()">
+                                <i class="fas fa-upload"></i> Change Image
+                            </button>
+                            <button type="submit" class="upload-btn" name="upload_profile_image" style="margin-top: 10px; background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);">
+                                <i class="fas fa-save"></i> Save Image
+                            </button>
+                        </div>
+                        <div class="form-section">
+                            <div class="form-group">
+                                <label for="view_full_name">Full Name</label>
+                                <input type="text" id="view_full_name" name="full_name" placeholder="Enter full name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="view_email">Email Address</label>
+                                <input type="email" id="view_email" name="email" placeholder="Enter email address" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="view_username">Username</label>
+                                <input type="text" id="view_username" name="username" placeholder="Enter username" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="view_role">User Role</label>
+                                <select id="view_role" name="role" required>
+                                    <option value="">Select Role</option>
+                                    <option value="Admin">Admin</option>
+                                    <option value="Staff">Staff</option>
+                                    <option value="Regular User">Regular User</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="submit-btn" name="update_user">
+                                <i class="fas fa-save"></i>
+                                Save Changes
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal-overlay" id="deleteModalOverlay">
+        <div class="modal delete-modal">
+            <div class="modal-header">
+                <h3 class="modal-title">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Confirm Delete
+                </h3>
+                <button class="close-btn" onclick="closeDeleteModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="warning-icon">
+                    <i class="fas fa-exclamation-circle"></i>
+                </div>
+                <h3 style="margin-bottom: 10px; color: #e74c3c;">Are you sure?</h3>
+                <p id="deleteMessage" style="color: #666; line-height: 1.6;">
+                    You are about to delete a user record. This action cannot be undone.
+                </p>
+                <div class="delete-actions">
+                    <button class="cancel-btn" onclick="closeDeleteModal()">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                    <a href="#" id="confirmDeleteBtn" class="confirm-delete-btn">
+                        <i class="fas fa-trash"></i> Delete
+                    </a>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         // DOM Elements
-        const openModalBtn = document.getElementById('openModalBtn');
-        const closeModalBtn = document.getElementById('closeModalBtn');
-        const modalOverlay = document.getElementById('modalOverlay');
-        const userForm = document.getElementById('userForm');
-        const modalTitle = document.getElementById('modalTitle');
-        const submitBtn = document.getElementById('submitBtn');
-        const recordId = document.getElementById('record_id');
+        const addModalOverlay = document.getElementById('addModalOverlay');
+        const viewModalOverlay = document.getElementById('viewModalOverlay');
+        const deleteModalOverlay = document.getElementById('deleteModalOverlay');
 
-        // Initialize the dashboard
-        function initDashboard() {
-            // Set up event listeners
-            openModalBtn.addEventListener('click', openAddModal);
-            closeModalBtn.addEventListener('click', closeModal);
-            modalOverlay.addEventListener('click', (e) => {
-                if (e.target === modalOverlay) closeModal();
-            });
-            
-            // Add keyboard event listener to close modal on ESC key
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') closeModal();
-            });
+        // Open Add Modal
+        document.getElementById('openModalBtn').addEventListener('click', () => {
+            addModalOverlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        });
+
+        // Close Add Modal
+        function closeAddModal() {
+            addModalOverlay.classList.remove('active');
+            document.body.style.overflow = 'auto';
         }
 
-        // Open modal for adding user
-        function openAddModal() {
-            modalTitle.innerHTML = '<i class="fas fa-user-plus"></i> Add New User';
-            submitBtn.innerHTML = '<i class="fas fa-plus"></i> Add User';
-            submitBtn.name = 'add_user';
-            userForm.reset();
-            recordId.value = '';
-            openModal();
+        // Open View/Edit Modal
+        function openViewModal(recordId) {
+            // Fetch user data via AJAX
+            fetch(`get_user.php?id=${recordId}`)
+                .then(response => response.json())
+                .then(user => {
+                    document.getElementById('view_record_id').value = user.id;
+                    document.getElementById('view_full_name').value = user.full_name;
+                    document.getElementById('view_email').value = user.email;
+                    document.getElementById('view_username').value = user.username;
+                    document.getElementById('view_role').value = user.user_role;
+                    
+                    // Set profile image
+                    const profileImg = document.getElementById('viewProfileImage');
+                    profileImg.src = `uploads/${user.profile_image || 'default-avatar.png'}`;
+                    profileImg.onerror = function() {
+                        this.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDE1MCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxjaXJdsZUgY3g9Ijc1IiBjeT0iNzUiIHI9Ijc1IiBmaWxsPSIjZGRkZGRkIi8+CjxzdmcgeD0iNDAiIHk9IjQwIiB3aWR0aD0iNzAiIGhlaWdodD0iNzAiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSI+CjxwYXRoIGQ9Ik0xMiAyQzEzLjEgMiAxNCAyLjkgMTQgNEMxNCA1LjEgMTMuMSA2IDEyIDZDMTAgNiAxMCA1LjEgMTAgNEMxMCAyLjkgMTAuOSAyIDEyIDJaTTIxIDE4VjIwSDNWMThDMyAxNS44IDYuMSAxNCAxMiAxNEMxNy45IDE0IDIxIDE1LjkgMjEgMThaIiBmaWxsPSIjOTk5OTk5Ii8+Cjwvc3ZnPgo8L3N2Zz4K';
+                    };
+                    
+                    viewModalOverlay.classList.add('active');
+                    document.body.style.overflow = 'hidden';
+                })
+                .catch(error => {
+                    console.error('Error fetching user data:', error);
+                    alert('Error loading user data');
+                });
         }
 
-        // Open modal for editing user
-        function openEditModal(id, fullName, email, username, role) {
-            modalTitle.innerHTML = '<i class="fas fa-user-edit"></i> Edit User';
-            submitBtn.innerHTML = '<i class="fas fa-save"></i> Update User';
-            submitBtn.name = 'update_user';
-            
-            // Prefill form with user data
-            recordId.value = id;
-            document.getElementById('full_name').value = fullName;
-            document.getElementById('email').value = email;
-            document.getElementById('username').value = username;
-            document.getElementById('role').value = role;
-            
-            openModal();
+        // Close View Modal
+        function closeViewModal() {
+            viewModalOverlay.classList.remove('active');
+            document.body.style.overflow = 'auto';
         }
 
-        // Open modal function
-        function openModal() {
-            modalOverlay.classList.add('active');
+        // Open Edit Modal (same as view but with edit mode)
+        function openEditModal(recordId) {
+            openViewModal(recordId);
+        }
+
+        // Confirm Delete
+        function confirmDelete(recordId, userName) {
+            document.getElementById('deleteMessage').innerHTML = 
+                `You are about to delete <strong>"${userName}"</strong>. This action cannot be undone.`;
+            document.getElementById('confirmDeleteBtn').href = `?delete=${recordId}`;
+            deleteModalOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
         }
 
-        // Close modal function
-        function closeModal() {
-            modalOverlay.classList.remove('active');
+        // Close Delete Modal
+        function closeDeleteModal() {
+            deleteModalOverlay.classList.remove('active');
             document.body.style.overflow = 'auto';
         }
+
+        // Image Preview Functions
+        function previewAddImage(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('addProfileImage').src = e.target.result;
+                }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        function previewViewImage(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('viewProfileImage').src = e.target.result;
+                }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        // Close modals on overlay click
+        document.addEventListener('click', (e) => {
+            if (e.target === addModalOverlay) closeAddModal();
+            if (e.target === viewModalOverlay) closeViewModal();
+            if (e.target === deleteModalOverlay) closeDeleteModal();
+        });
+
+        // Close modals on ESC key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeAddModal();
+                closeViewModal();
+                closeDeleteModal();
+            }
+        });
 
         // Auto-hide PHP messages after 5 seconds
         setTimeout(() => {
@@ -806,9 +1187,6 @@ if (isset($_POST['logout'])) {
                 phpMessage.style.display = 'none';
             }
         }, 5000);
-
-        // Initialize the dashboard when the page loads
-        document.addEventListener('DOMContentLoaded', initDashboard);
     </script>
 </body>
 </html>
